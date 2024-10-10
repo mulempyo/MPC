@@ -55,7 +55,6 @@
 
 
   <export>
-    <nav_core plugin="${prefix}/global_planner_plugin.xml" />
     <nav_core plugin="${prefix}/mpc_plugin.xml"/>
   </export>
 </package>
