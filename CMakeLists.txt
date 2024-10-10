@@ -52,24 +52,6 @@ catkin_package(
 ###########
 
 # General MPC_Node 
-ADD_EXECUTABLE( MPC_Node src/MPC.cpp src/MPC_Node.cpp )
-TARGET_LINK_LIBRARIES(MPC_Node ipopt ${catkin_LIBRARIES} )
-
-# Total navigation with MPC_Node
-ADD_EXECUTABLE( nav_mpc src/navMPC.cpp src/navMPCNode.cpp )
-TARGET_LINK_LIBRARIES(nav_mpc ipopt ${catkin_LIBRARIES} )
-
-# Local planner with MPC_Node for tracking
-ADD_EXECUTABLE( tracking_reference_trajectory src/trackRefTraj.cpp src/trackRefTrajNode.cpp )
-TARGET_LINK_LIBRARIES(tracking_reference_trajectory ipopt ${catkin_LIBRARIES} )
-
-# Pure Pursuit Node
-add_executable(Pure_Pursuit src/Pure_Pursuit.cpp)
-target_link_libraries(Pure_Pursuit ${catkin_LIBRARIES})
-
-# Own Global planner for tracking desired trajectory
-add_library(global_planner_lib src/global_planner/global_planner.cpp)
-TARGET_LINK_LIBRARIES(global_planner_lib ipopt ${catkin_LIBRARIES} )
 
 # MPC Local planner plugin
 add_library(mpc_ros src/mpc_plannner_ros.cpp src/mpc_plannner.cpp)
