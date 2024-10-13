@@ -1,18 +1,3 @@
-/*
- * mpc_ros
- * Copyright (c) 2021, Geonhee Lee
- *
- * THE WORK (AS DEFINED BELOW) IS PROVIDED UNDER THE TERMS OF THIS CREATIVE
- * COMMONS PUBLIC LICENSE ("CCPL" OR "LICENSE"). THE WORK IS PROTECTED BY
- * COPYRIGHT AND/OR OTHER APPLICABLE LAW. ANY USE OF THE WORK OTHER THAN AS
- * AUTHORIZED UNDER THIS LICENSE OR COPYRIGHT LAW IS PROHIBITED.
- *
- * BY EXERCISING ANY RIGHTS TO THE WORK PROVIDED HERE, YOU ACCEPT AND AGREE TO
- * BE BOUND BY THE TERMS OF THIS LICENSE. THE LICENSOR GRANTS YOU THE RIGHTS
- * CONTAINED HERE IN CONSIDERATION OF YOUR ACCEPTANCE OF SUCH TERMS AND
- * CONDITIONS.
- *
- */
 
 #include "mpc_plannner_ros.h"
 #include <pluginlib/class_list_macros.h>
@@ -36,8 +21,6 @@ namespace mpc_ros{
 	void MPCPlannerROS::initialize(std::string name, tf2_ros::Buffer* tf, costmap_2d::Costmap2DROS* costmap_ros){
 
         ros::NodeHandle private_nh("~/" + name);
-        g_plan_pub_ = private_nh.advertise<nav_msgs::Path>("global_plan", 1);
-        l_plan_pub_ = private_nh.advertise<nav_msgs::Path>("local_plan", 1);
 
 		tf_ = tf;
 		costmap_ros_ = costmap_ros;
@@ -78,11 +61,13 @@ namespace mpc_ros{
         private_nh.param<std::string>("odom_frame", _odom_frame, "odom");
         private_nh.param<std::string>("base_frame", _base_frame, "base_footprint");
 
+        private_nh.param("xy_goal_tolerance", xy_goal_tolerance_, 0.2);
+
 
         //Publishers and Subscribers
         _sub_odom   = _nh.subscribe("odom", 1, &MPCPlannerROS::odomCB, this);
-        _pub_mpctraj   = _nh.advertise<nav_msgs::Path>("mpc_trajectory", 1);// MPC trajectory output
-        _pub_odompath  = _nh.advertise<nav_msgs::Path>("mpc_reference", 1); // reference path for MPC ///mpc_reference 
+        global_plan_pub_   = _nh.advertise<nav_msgs::Path>("mpc_planner", 1);
+         
         
 
         //Init variables
@@ -144,24 +129,18 @@ namespace mpc_ros{
       _max_throttle = config.max_throttle;
       _bound_value = config.bound_value;
 
-
-      planner_util_.reconfigureCB(limits, false);
-
   }
-
-    void MPCPlannerROS::publishLocalPlan(std::vector<geometry_msgs::PoseStamped>& path) {
-        base_local_planner::publishPlan(path, l_plan_pub_);
-    }
-
-    void MPCPlannerROS::publishGlobalPlan(std::vector<geometry_msgs::PoseStamped>& path) {
-        base_local_planner::publishPlan(path, g_plan_pub_);
-    }
   
 	bool MPCPlannerROS::setPlan(const std::vector<geometry_msgs::PoseStamped>& orig_global_plan){
         if( ! isInitialized()) {
             ROS_ERROR("This planner has not been initialized, please call initialize() before using this planner");
             return false;
         }
+
+        goal_reached_ = false;
+ 
+
+        ROS_WARN("start Plan");
 
         //Init parameters for MPC object
         _mpc_params["DT"] = _dt;
@@ -193,63 +172,9 @@ namespace mpc_ros{
         cout << "mpc_w_etheta: "  << _w_etheta << endl;
         cout << "mpc_max_angvel: "  << _max_angvel << endl;
 
-        latchedStopRotateController_.resetLatching();
         planner_util_.setPlan(orig_global_plan);
         
 	return true;
-    }
-
-    void MPCPlannerROS::updatePlanAndLocalCosts(
-        const geometry_msgs::PoseStamped& global_pose,
-        const std::vector<geometry_msgs::PoseStamped>& new_plan,
-        const std::vector<geometry_msgs::Point>& footprint_spec) {
-        
-        global_plan_.resize(new_plan.size());
-        for (unsigned int i = 0; i < new_plan.size(); ++i) {
-            global_plan_[i] = new_plan[i];
-        }
-
-        /*
-        obstacle_costs_.setFootprint(footprint_spec);
-
-        // costs for going away from path
-        path_costs_.setTargetPoses(global_plan_);
-
-        // costs for not going towards the local goal as much as possible
-        goal_costs_.setTargetPoses(global_plan_);
-
-        // alignment costs
-        geometry_msgs::PoseStamped goal_pose = global_plan_.back();
-
-        Eigen::Vector3f pos(global_pose.pose.position.x, global_pose.pose.position.y, tf2::getYaw(global_pose.pose.orientation));
-        double sq_dist =
-            (pos[0] - goal_pose.pose.position.x) * (pos[0] - goal_pose.pose.position.x) +
-            (pos[1] - goal_pose.pose.position.y) * (pos[1] - goal_pose.pose.position.y);
-
-        // we want the robot nose to be drawn to its final position
-        // (before robot turns towards goal orientation), not the end of the
-        // path for the robot center. Choosing the final position after
-        // turning towards goal orientation causes instability when the
-        // robot needs to make a 180 degree turn at the end
-        std::vector<geometry_msgs::PoseStamped> front_global_plan = global_plan_;
-        double angle_to_goal = atan2(goal_pose.pose.position.y - pos[1], goal_pose.pose.position.x - pos[0]);
-        front_global_plan.back().pose.position.x = front_global_plan.back().pose.position.x +
-        forward_point_distance_ * cos(angle_to_goal);
-        front_global_plan.back().pose.position.y = front_global_plan.back().pose.position.y + forward_point_distance_ *
-        sin(angle_to_goal);
-
-        goal_front_costs_.setTargetPoses(front_global_plan);
-        
-        // keeping the nose on the path
-        if (sq_dist > forward_point_distance_ * forward_point_distance_ * cheat_factor_) {
-            alignment_costs_.setScale(path_distance_bias_);
-        // costs for robot being aligned with path (nose on path, not ju
-            alignment_costs_.setTargetPoses(global_plan_);
-        } else {
-        // once we are close to goal, trying to keep the nose close to anything destabilizes behavior.
-            alignment_costs_.setScale(0.0);
-        }
-        */
     }
 
 	bool MPCPlannerROS::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
@@ -263,145 +188,69 @@ namespace mpc_ros{
             ROS_ERROR("Could not get local plan");
             return false;
         }
+
+        geometry_msgs::PoseStamped robot_vel;
+        odom_helper_.getRobotVel(robot_vel);
+
         //if the global plan passed in is empty... we won't do anything
         if(transformed_plan.empty()) {
             ROS_WARN_NAMED("mpc_planner", "Received an empty transformed plan.");
             return false;
         }
         ROS_DEBUG_NAMED("mpc_planner", "Received a transformed plan with %zu points.", transformed_plan.size());
-        updatePlanAndLocalCosts(current_pose_, transformed_plan, costmap_ros_->getRobotFootprint());
 
-        if (latchedStopRotateController_.isPositionReached(&planner_util_, current_pose_)){
-            //publish an empty plan because we've reached our goal position
-            std::vector<geometry_msgs::PoseStamped> local_plan;
-            std::vector<geometry_msgs::PoseStamped> transformed_plan;
-            publishGlobalPlan(transformed_plan);
-            publishLocalPlan(local_plan);
-            base_local_planner::LocalPlannerLimits limits = planner_util_.getCurrentLimits();
-            ROS_WARN_NAMED("mpc_ros", "Reached the goal!!!.");
-            return true;
-            /*return latchedStopRotateController_.computeVelocityCommandsStopRotate(
-                cmd_vel,
-                limits.getAccLimits(),
-                dp_->getSimPeriod(),
-                &planner_util_,
-                odom_helper_,
-                current_pose_,
-                boost::bind(&MPCPlannerROS::checkTrajectory, dp_, _1, _2, _3));*/
-
+        global_plan_.resize(transformed_plan.size());
+        for (unsigned int i = 0; i < transformed_plan.size(); ++i) {
+            global_plan_[i] = transformed_plan[i];
         }
+        
+        publishGlobalPlan(global_plan_);
+        geometry_msgs::PoseStamped drive_cmds;
+        drive_cmds.header.frame_id = costmap_ros_->getBaseFrameID();
+        
+         bool success = mpcComputeVelocityCommands(current_pose_, robot_vel, drive_cmds);
 
-        /*if (latchedStopRotateController_.isPositionReached(&planner_util_, current_pose_)) {
-            //publish an empty plan because we've reached our goal position
-            std::vector<geometry_msgs::PoseStamped> local_plan;
-            std::vector<geometry_msgs::PoseStamped> transformed_plan;
-            publishGlobalPlan(transformed_plan);
-            publishLocalPlan(local_plan);
-            base_local_planner::LocalPlannerLimits limits = planner_util_.getCurrentLimits();
-            return latchedStopRotateController_.computeVelocityCommandsStopRotate(
-                cmd_vel,
-                limits.getAccLimits(),
-                dp_->getSimPeriod(),
-                &planner_util_,
-                odom_helper_,
-                current_pose_,
-                boost::bind(&DWAPlanner::checkTrajectory, dp_, _1, _2, _3));
-        } else */{
-            bool isOk = mpcComputeVelocityCommands(current_pose_, cmd_vel);
-            if (isOk) {
-                publishGlobalPlan(transformed_plan);
-            } else {
-                ROS_WARN_NAMED("mpc_ros", "MPC Planner failed to produce path.");
-                std::vector<geometry_msgs::PoseStamped> empty_plan;
-                publishGlobalPlan(empty_plan);
-            }
-            return isOk;
-        }
+         if(!success)
+         {
+          cmd_vel.linear.x = 0.0;
+          cmd_vel.angular.z = 0.0;
+          return false;
+         } else{
+         cmd_vel.linear.x = drive_cmds.pose.position.x;
+         cmd_vel.linear.y = drive_cmds.pose.position.y;
+         cmd_vel.angular.z = tf2::getYaw(drive_cmds.pose.orientation);
+    
+
+         geometry_msgs::PoseStamped robot_pose;
+         costmap_ros_->getRobotPose(robot_pose);
+         geometry_msgs::PoseStamped global_ = global_plan_.back();
+
+         double dx = robot_pose.pose.position.x - global_.pose.position.x;
+         double dy = robot_pose.pose.position.y - global_.pose.position.y;
+
+         if (hypot(dx, dy) <= xy_goal_tolerance_) {
+           cmd_vel.linear.x = 0.0;
+           cmd_vel.angular.z = 0.0;
+           goal_reached_ = true;
+           ROS_INFO("Goal reached.");
+         }
+          return true;
+         }
     }
 
     // Timer: Control Loop (closed loop nonlinear MPC)
-    bool MPCPlannerROS::mpcComputeVelocityCommands(geometry_msgs::PoseStamped global_pose, geometry_msgs::Twist& cmd_vel)
+    bool MPCPlannerROS::mpcComputeVelocityCommands(geometry_msgs::PoseStamped global_pose, geometry_msgs::PoseStamped& global_vel, 
+    geometry_msgs::PoseStamped& drive_cmds)
     {         
-        // dynamic window sampling approach to get useful velocity commands
-        if(! isInitialized()){
-            ROS_ERROR("This planner has not been initialized, please call initialize() before using this planner");
-            return false;
-        }
-
-        geometry_msgs::PoseStamped robot_vel;
-        odom_helper_.getRobotVel(robot_vel);
-
-        //compute what trajectory to drive along
-        geometry_msgs::PoseStamped drive_cmds;
-        drive_cmds.header.frame_id = costmap_ros_->getBaseFrameID();
-
-
-        // call with updated footprint
-        base_local_planner::Trajectory path = findBestPath(global_pose, robot_vel, drive_cmds);
-        //base_local_planner::Trajectory path = dp_->findBestPath(global_pose, robot_vel, drive_cmds);
-        //ROS_ERROR("Best: %.2f, %.2f, %.2f, %.2f", path.xv_, path.yv_, path.thetav_, path.cost_);
-
-        //pass along drive commands
-        cmd_vel.linear.x = drive_cmds.pose.position.x;
-        cmd_vel.linear.y = drive_cmds.pose.position.y;
-        cmd_vel.angular.z = tf2::getYaw(drive_cmds.pose.orientation);
-
-        //if we cannot move... tell someone
-        std::vector<geometry_msgs::PoseStamped> local_plan;
-        if(path.cost_ < 0) {
-            ROS_DEBUG_NAMED("mpc_ros",
-                "The dwa local planner failed to find a valid plan, cost functions discarded all candidates. This can mean there is an obstacle too close to the robot.");
-            local_plan.clear();
-            publishLocalPlan(local_plan);
-            return false;
-        }
-
-        ROS_DEBUG_NAMED("mpc_ros", "A valid velocity command of (%.2f, %.2f, %.2f) was found for this cycle.", 
-                        cmd_vel.linear.x, cmd_vel.linear.y, cmd_vel.angular.z);
-
-        // Fill out the local plan
-        for(unsigned int i = 0; i < path.getPointsSize(); ++i) {
-            double p_x, p_y, p_th;
-            path.getPoint(i, p_x, p_y, p_th);
-
-            geometry_msgs::PoseStamped p;
-            p.header.frame_id = costmap_ros_->getGlobalFrameID();
-            p.header.stamp = ros::Time::now();
-            p.pose.position.x = p_x;
-            p.pose.position.y = p_y;
-            p.pose.position.z = 0.0;
-            tf2::Quaternion q;
-            q.setRPY(0, 0, p_th);
-            tf2::convert(q, p.pose.orientation);
-            local_plan.push_back(p);
-        }
-
-        //publish information to the visualizer
-
-        publishLocalPlan(local_plan);
-        return true;
-    }
-
-    base_local_planner::Trajectory MPCPlannerROS::findBestPath(
-      const geometry_msgs::PoseStamped& global_pose,
-      const geometry_msgs::PoseStamped& global_vel,
-      geometry_msgs::PoseStamped& drive_velocities){
-
-        base_local_planner::Trajectory result_traj_;
+    base_local_planner::Trajectory result_traj_;
 
         Eigen::Vector3f pos(global_pose.pose.position.x, global_pose.pose.position.y, tf2::getYaw(global_pose.pose.orientation));
         Eigen::Vector3f vel(global_vel.pose.position.x, global_vel.pose.position.y, tf2::getYaw(global_vel.pose.orientation));
         geometry_msgs::PoseStamped goal_pose = global_plan_.back();
         Eigen::Vector3f goal(goal_pose.pose.position.x, goal_pose.pose.position.y, tf2::getYaw(goal_pose.pose.orientation));
         base_local_planner::LocalPlannerLimits limits = planner_util_.getCurrentLimits();
-        result_traj_.cost_ = 1;
-
-        /*
-        *
-        *  MPC Control Loop
-        * 
-        */
-        //copy over the odometry information
+         result_traj_.cost_ = 1;
+      
         nav_msgs::Odometry base_odom = _odom;
 
         // Update system states: X=[x, y, theta, v]
@@ -465,7 +314,7 @@ namespace mpc_ros{
                 ROS_DEBUG_NAMED("mpc_ros", "Failed to path generation since small down-sampling path.");
                 _waypointsDist = -1;
                 result_traj_.cost_ = -1;
-                return result_traj_;
+                return false;
             }
             //DEBUG      
             if(_debug_info){
@@ -610,75 +459,36 @@ namespace mpc_ros{
         }     
 
         if(result_traj_.cost_ < 0){
-            drive_velocities.pose.position.x = 0;
-            drive_velocities.pose.position.y = 0;
-            drive_velocities.pose.position.z = 0;
-            drive_velocities.pose.orientation.w = 1;
-            drive_velocities.pose.orientation.x = 0;
-            drive_velocities.pose.orientation.y = 0;
-            drive_velocities.pose.orientation.z = 0;
+            drive_cmds.pose.position.x = 0;
+            drive_cmds.pose.position.y = 0;
+            drive_cmds.pose.position.z = 0;
+            drive_cmds.pose.orientation.w = 1;
+            drive_cmds.pose.orientation.x = 0;
+            drive_cmds.pose.orientation.y = 0;
+            drive_cmds.pose.orientation.z = 0;
         }
         else{
-            drive_velocities.pose.position.x = _speed;
-            drive_velocities.pose.position.y = 0;
-            drive_velocities.pose.position.z = 0;
+            drive_cmds.pose.position.x = _speed;
+            drive_cmds.pose.position.y = 0;
+            drive_cmds.pose.position.z = 0;
             tf2::Quaternion q;
             q.setRPY(0, 0, _w);
-            tf2::convert(q, drive_velocities.pose.orientation);
+            tf2::convert(q, drive_cmds.pose.orientation);
         }
         
-        // publish the mpc trajectory
-        _pub_mpctraj.publish(_mpc_traj);
-
-        // http://docs.ros.org/en/jade/api/base_local_planner/html/classbase__local__planner_1_1SimpleTrajectoryGenerator.html#a0810ac35a39d3d7ccc1c19a862e97fbf
-        // prepare cost functions and generators for this run
-        /*
-        Eigen::Vector3f vsamples_;
-        int vx_samp, vy_samp, vth_samp;
-        if (vx_samp <= 0) {
-            ROS_WARN("You've specified that you don't want any samples in the x dimension. We'll at least assume that you want to sample one value... so we're going to set vx_samples to 1 instead");
-            vx_samp = 1;
-        }
-    
-        if (vy_samp <= 0) {
-            ROS_WARN("You've specified that you don't want any samples in the y dimension. We'll at least assume that you want to sample one value... so we're going to set vy_samples to 1 instead");
-            vy_samp = 1;
-        }
-    
-        if (vth_samp <= 0) {
-        ROS_WARN("You've specified that you don't want any samples in the th dimension. We'll at least assume that you want to sample one value... so we're going to set vth_samples to 1 instead");
-        vth_samp = 1;
-        }
-        vsamples_[0] = vx_samp;
-        vsamples_[1] = vy_samp;
-        vsamples_[2] = vth_samp;
-        generator_.initialise(pos,
-            vel,
-            goal,
-            &limits,
-            vsamples_);
-            */
-
-        return result_traj_;
+        return true;
     }
 
-	bool MPCPlannerROS::isGoalReached(){
-        if( ! isInitialized()) {
-            ROS_ERROR("This planner has not been initialized, please call initialize() before using this planner");
-            return false;
-        }
 
-        if ( ! costmap_ros_->getRobotPose(current_pose_)) {
-            ROS_ERROR("Could not get robot pose");
-            return false;
-        }
-
-        if(latchedStopRotateController_.isGoalReached(&planner_util_, odom_helper_, current_pose_)) {
-            ROS_INFO("Goal reached");
-            return true;
-        } else {
-            return false;
-        }
+	bool MPCPlannerROS::isGoalReached()
+    {
+      // check if plugin is initialized
+      if (!initialized_)
+      {
+        ROS_ERROR("mpc_local_planner has not been initialized, please call initialize() before using this planner");
+        return false;
+      }
+        return goal_reached_;
     }
 
     // Evaluate a polynomial.
@@ -691,10 +501,7 @@ namespace mpc_ros{
         }
         return result;
     }
-
-    // Fit a polynomial.
-    // Adapted from
-    // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
+    
     Eigen::VectorXd MPCPlannerROS::polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals, int order) 
     {
         assert(xvals.size() == yvals.size());
@@ -718,5 +525,14 @@ namespace mpc_ros{
     void MPCPlannerROS::odomCB(const nav_msgs::Odometry::ConstPtr& odomMsg)
     {
         _odom = *odomMsg;
+    }
+
+    void MPCPlannerROS::publishGlobalPlan(const std::vector<geometry_msgs::PoseStamped>& global_plan)
+    {
+      nav_msgs::Path gui_path;
+      gui_path.header.frame_id = _map_frame;
+      gui_path.header.stamp = ros::Time::now();
+      gui_path.poses = global_plan;
+      global_plan_pub_.publish(gui_path);
     }
 }
