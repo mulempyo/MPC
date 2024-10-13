@@ -67,8 +67,8 @@ namespace mpc_ros{
         //Publishers and Subscribers
         _sub_odom   = _nh.subscribe("odom", 1, &MPCPlannerROS::odomCB, this);
         global_plan_pub_   = _nh.advertise<nav_msgs::Path>("mpc_planner", 1);
-         
-        
+        _pub_mpctraj = _nh.advertise<nav_msgs::Path>("mpc_trajectory",1);
+        _pub_odompath = _nh.advertise<nav_msgs::Path>("mpc_reference",1);
 
         //Init variables
         _throttle = 0.0; 
@@ -204,7 +204,6 @@ namespace mpc_ros{
             global_plan_[i] = transformed_plan[i];
         }
         
-        publishGlobalPlan(global_plan_);
         geometry_msgs::PoseStamped drive_cmds;
         drive_cmds.header.frame_id = costmap_ros_->getBaseFrameID();
         
@@ -219,6 +218,25 @@ namespace mpc_ros{
          cmd_vel.linear.x = drive_cmds.pose.position.x;
          cmd_vel.linear.y = drive_cmds.pose.position.y;
          cmd_vel.angular.z = tf2::getYaw(drive_cmds.pose.orientation);
+
+         std::vector<geometry_msgs::PoseStamped> local_plan;
+
+          for(unsigned int i = 0; i < result_traj_.getPointsSize(); ++i) {
+            double p_x, p_y, p_th;
+            result_traj_.getPoint(i, p_x, p_y, p_th);
+
+            geometry_msgs::PoseStamped p;
+            p.header.frame_id = costmap_ros_->getGlobalFrameID();
+            p.header.stamp = ros::Time::now();
+            p.pose.position.x = p_x;
+            p.pose.position.y = p_y;
+            p.pose.position.z = 0.0;
+            tf2::Quaternion q;
+            q.setRPY(0, 0, p_th);
+            tf2::convert(q, p.pose.orientation);
+            local_plan.push_back(p);
+        }
+         publishGlobalPlan(local_plan);
     
 
          geometry_msgs::PoseStamped robot_pose;
@@ -242,7 +260,7 @@ namespace mpc_ros{
     bool MPCPlannerROS::mpcComputeVelocityCommands(geometry_msgs::PoseStamped global_pose, geometry_msgs::PoseStamped& global_vel, 
     geometry_msgs::PoseStamped& drive_cmds)
     {         
-    base_local_planner::Trajectory result_traj_;
+    
 
         Eigen::Vector3f pos(global_pose.pose.position.x, global_pose.pose.position.y, tf2::getYaw(global_pose.pose.orientation));
         Eigen::Vector3f vel(global_vel.pose.position.x, global_vel.pose.position.y, tf2::getYaw(global_vel.pose.orientation));
@@ -475,7 +493,7 @@ namespace mpc_ros{
             q.setRPY(0, 0, _w);
             tf2::convert(q, drive_cmds.pose.orientation);
         }
-        
+        _pub_mpctraj.publish(_mpc_traj);
         return true;
     }
 

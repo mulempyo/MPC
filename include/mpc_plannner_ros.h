@@ -116,6 +116,7 @@ namespace mpc_ros{
             geometry_msgs::PoseStamped current_pose_;
             
             base_local_planner::SimpleTrajectoryGenerator generator_;
+            base_local_planner::Trajectory result_traj_;
             base_local_planner::SimpleScoredSamplingPlanner scored_sampling_planner_;
             dynamic_reconfigure::Server<MPCPlannerConfig> *dsrv_;
             void reconfigureCB(MPCPlannerConfig &config, uint32_t level);
