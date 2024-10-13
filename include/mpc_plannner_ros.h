@@ -75,9 +75,7 @@ namespace mpc_ros{
                 costmap_2d::Costmap2DROS* costmap_ros);
 
             // for visualisation, publishers of global and local plan
-            ros::Publisher g_plan_pub_, l_plan_pub_;
-            void publishLocalPlan(std::vector<geometry_msgs::PoseStamped>& path);
-            void publishGlobalPlan(std::vector<geometry_msgs::PoseStamped>& path);
+            ros::Publisher global_plan_pub_;
 
             void LoadParams(const std::map<string, double> &params);
 
@@ -86,10 +84,10 @@ namespace mpc_ros{
                 costmap_2d::Costmap2DROS* costmap_ros);
             bool setPlan(const std::vector<geometry_msgs::PoseStamped>& orig_global_plan);
             bool computeVelocityCommands(geometry_msgs::Twist& cmd_vel);
-            bool mpcComputeVelocityCommands(geometry_msgs::PoseStamped global_pose, geometry_msgs::Twist& cmd_vel);
-            base_local_planner::Trajectory findBestPath(const geometry_msgs::PoseStamped& global_pose, const geometry_msgs::PoseStamped& global_vel, geometry_msgs::PoseStamped& drive_velocities);
+            bool mpcComputeVelocityCommands(geometry_msgs::PoseStamped global_pose, geometry_msgs::PoseStamped& global_vel, geometry_msgs::PoseStamped& drive_cmds);
             bool isGoalReached();
             bool isInitialized() {return initialized_;}
+            void publishGlobalPlan(const std::vector<geometry_msgs::PoseStamped>& global_plan);
             /**
              * @brief  Update the cost functions before planning
              * @param  global_pose The robot's current pose
@@ -101,9 +99,6 @@ namespace mpc_ros{
              * The alignment cost functions get a version of the global plan
              *   that is modified based on the global_pose 
              */
-            void updatePlanAndLocalCosts(const geometry_msgs::PoseStamped& global_pose,
-                const std::vector<geometry_msgs::PoseStamped>& new_plan,
-                const std::vector<geometry_msgs::Point>& footprint_spec);
             // see constructor body for explanations
 
         private:
@@ -124,18 +119,10 @@ namespace mpc_ros{
             base_local_planner::SimpleScoredSamplingPlanner scored_sampling_planner_;
             dynamic_reconfigure::Server<MPCPlannerConfig> *dsrv_;
             void reconfigureCB(MPCPlannerConfig &config, uint32_t level);
-            /*
-            base_local_planner::ObstacleCostFunction obstacle_costs_;
-            base_local_planner::OscillationCostFunction oscillation_costs_;
-            base_local_planner::MapGridCostFunction path_costs_;
-            base_local_planner::MapGridCostFunction goal_costs_;
-            base_local_planner::MapGridCostFunction goal_front_costs_;
-            base_local_planner::MapGridCostFunction alignment_costs_;
-            base_local_planner::TwirlingCostFunction twirling_costs_;
-            */
-
+           
             // Flags
             bool initialized_;
+            bool goal_reached_;
 
         private:
         
@@ -166,6 +153,7 @@ namespace mpc_ros{
             //double _Lf; 
             double _dt, _w, _throttle, _speed, _max_speed;
             double _pathLength, _goalRadius, _waypointsDist;
+            double xy_goal_tolerance_;
             int _downSampling;
             bool _debug_info, _delay_mode;
             double polyeval(Eigen::VectorXd coeffs, double x);
@@ -174,6 +162,7 @@ namespace mpc_ros{
             void odomCB(const nav_msgs::Odometry::ConstPtr& odomMsg);
             void desiredPathCB(const nav_msgs::Path::ConstPtr& pathMsg);
             void controlLoopCB(const ros::TimerEvent&);
+            
     };
 };
 #endif /* MPC_LOCAL_PLANNER_NODE_ROS_H */
