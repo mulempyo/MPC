@@ -41,7 +41,7 @@
 #include <mpc_ros/MPCPlannerConfig.h>
 
 #include "ros/ros.h"
-#include "mpc_plannner.h"
+#include "mpc_planner.h"
 #include <iostream>
 #include <math.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>

@@ -1,5 +1,5 @@
 
-#include "mpc_plannner_ros.h"
+#include "mpc_planner_ros.h"
 #include <pluginlib/class_list_macros.h>
 
 using namespace std;

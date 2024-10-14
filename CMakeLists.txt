@@ -54,7 +54,7 @@ catkin_package(
 # General MPC_Node 
 
 # MPC Local planner plugin
-add_library(mpc_ros src/mpc_plannner_ros.cpp src/mpc_plannner.cpp)
+add_library(mpc_ros src/mpc_planner_ros.cpp src/mpc_planner.cpp)
 TARGET_LINK_LIBRARIES(mpc_ros ipopt ${catkin_LIBRARIES} )
 
 #############
