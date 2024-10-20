@@ -203,25 +203,32 @@ namespace mpc_ros{
             global_plan_[i] = transformed_plan[i];
         }
 
+        geometry_msgs::PoseStamped goal_pose = global_plan_.back();
+        double yaw = getYaw(current_pose_);
+
+  // Calculate the goal direction from the robot's current pose to the goal pose
+        double target_yaw = atan2(goal_pose.pose.position.y - robot_pose_y, goal_pose.pose.position.x - robot_pose_x);
+        
+        double yaw_error = angles::shortest_angular_distance(yaw,target_yaw);
+  
+       if (rotate) { 
+         if(fabs(yaw_error) > 0.02) {
+           cmd_vel.linear.x = 0.0;
+           cmd_vel.angular.z = 0.5;  
+           ROS_WARN("Rotating to correct yaw, yaw_error: %f", fabs(yaw_error));
+           return true; 
+         } else {
+           ROS_WARN("Yaw aligned, proceeding to move.");
+           rotate = false;  
+         } 
+       }
+
     geometry_msgs::PoseStamped robot_vel;
     odom_helper_.getRobotVel(robot_vel);
 
-    geometry_msgs::PoseStamped goal_pose = global_plan_.back();
-    double yaw = getYaw(current_pose_);
-
-    double target_yaw = atan2(goal_pose.pose.position.y - robot_pose_y, goal_pose.pose.position.x - robot_pose_x);
-    double yaw_error = angles::shortest_angular_distance(yaw, target_yaw);
-
-    
-    if (fabs(yaw_error) > 0.01 && rotate == true) {  
-        cmd_vel.linear.x = 0.0;
-        cmd_vel.angular.z = std::min(1.0, std::max(-1.0, yaw_error));    
-        return true;
-    }
- 
-    rotate = false;
     geometry_msgs::PoseStamped drive_cmds;
     drive_cmds.header.frame_id = costmap_ros_->getBaseFrameID();
+
         
     bool success = mpcComputeVelocityCommands(current_pose_, robot_vel, drive_cmds);
 
@@ -230,7 +237,7 @@ namespace mpc_ros{
           cmd_vel.linear.x = 0.0;
           cmd_vel.angular.z = 0.0;
           return false;
-         }else{
+         } else{
 
          cmd_vel.linear.x = drive_cmds.pose.position.x;
          cmd_vel.linear.y = drive_cmds.pose.position.y;
@@ -278,9 +285,7 @@ namespace mpc_ros{
     // Timer: Control Loop (closed loop nonlinear MPC)
     bool MPCPlannerROS::mpcComputeVelocityCommands(geometry_msgs::PoseStamped global_pose, geometry_msgs::PoseStamped& global_vel, 
     geometry_msgs::PoseStamped& drive_cmds)
-    {         
-    
-
+    {        
         Eigen::Vector3f pos(global_pose.pose.position.x, global_pose.pose.position.y, tf2::getYaw(global_pose.pose.orientation));
         Eigen::Vector3f vel(global_vel.pose.position.x, global_vel.pose.position.y, tf2::getYaw(global_vel.pose.orientation));
         geometry_msgs::PoseStamped goal_pose = global_plan_.back();
@@ -464,9 +469,6 @@ namespace mpc_ros{
             cout << "\n\nDEBUG" << endl;
             cout << "theta: " << theta << endl;
             cout << "V: " << v << endl;
-            //cout << "odom_path: \n" << odom_path << endl;
-            //cout << "x_points: \n" << x_veh << endl;
-            //cout << "y_points: \n" << y_veh << endl;
             cout << "coeffs: \n" << coeffs << endl;
             cout << "_w: \n" << _w << endl;
             cout << "_throttle: \n" << _throttle << endl;
