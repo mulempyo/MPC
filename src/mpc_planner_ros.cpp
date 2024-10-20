@@ -177,60 +177,60 @@ namespace mpc_ros{
 	return true;
     }
 
-	bool MPCPlannerROS::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
-        // dispatches to either dwa sampling control or stop and rotate control, depending on whether we have been close enough to goal
-        if ( ! costmap_ros_->getRobotPose(current_pose_)) {
-            ROS_ERROR("Could not get robot pose");
-            return false;
-        }
-        double robot_pose_x = current_pose_.pose.position.x;
-        double robot_pose_y = current_pose_.pose.position.y; 
+    bool MPCPlannerROS::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
+   
+    if (!costmap_ros_->getRobotPose(current_pose_)) {
+        ROS_ERROR("Could not get robot pose");
+        return false;
+    }
 
-        std::vector<geometry_msgs::PoseStamped> transformed_plan;
-        if ( ! planner_util_.getLocalPlan(current_pose_, transformed_plan)) {
-            ROS_ERROR("Could not get local plan");
-            return false;
-        }
+    double robot_pose_x = current_pose_.pose.position.x;
+    double robot_pose_y = current_pose_.pose.position.y;
 
-        geometry_msgs::PoseStamped robot_vel;
-        odom_helper_.getRobotVel(robot_vel);
+    std::vector<geometry_msgs::PoseStamped> transformed_plan;
+    if (!planner_util_.getLocalPlan(current_pose_, transformed_plan)) {
+        ROS_ERROR("Could not get local plan");
+        return false;
+    }
 
-        //if the global plan passed in is empty... we won't do anything
-        if(transformed_plan.empty()) {
-            ROS_WARN_NAMED("mpc_planner", "Received an empty transformed plan.");
-            return false;
-        }
-        ROS_DEBUG_NAMED("mpc_planner", "Received a transformed plan with %zu points.", transformed_plan.size());
-
-        global_plan_.resize(transformed_plan.size());
+    if (transformed_plan.empty()) {
+        ROS_WARN_NAMED("mpc_planner", "Received an empty transformed plan.");
+        return false;
+    }
+   
+    global_plan_.resize(transformed_plan.size());
         for (unsigned int i = 0; i < transformed_plan.size(); ++i) {
             global_plan_[i] = transformed_plan[i];
         }
+
+    geometry_msgs::PoseStamped robot_vel;
+    odom_helper_.getRobotVel(robot_vel);
+
+    geometry_msgs::PoseStamped goal_pose = global_plan_.back();
+    double yaw = getYaw(current_pose_);
+
+    double target_yaw = atan2(goal_pose.pose.position.y - robot_pose_y, goal_pose.pose.position.x - robot_pose_x);
+    double yaw_error = angles::shortest_angular_distance(yaw, target_yaw);
+
+    
+    if (fabs(yaw_error) > 0.01 && rotate == true) {  
+        cmd_vel.linear.x = 0.0;
+        cmd_vel.angular.z = std::min(1.0, std::max(-1.0, yaw_error));    
+        return true;
+    }
+ 
+    rotate = false;
+    geometry_msgs::PoseStamped drive_cmds;
+    drive_cmds.header.frame_id = costmap_ros_->getBaseFrameID();
         
-        geometry_msgs::PoseStamped drive_cmds;
-        drive_cmds.header.frame_id = costmap_ros_->getBaseFrameID();
-        
-         bool success = mpcComputeVelocityCommands(current_pose_, robot_vel, drive_cmds);
+    bool success = mpcComputeVelocityCommands(current_pose_, robot_vel, drive_cmds);
 
          if(!success)
          {
           cmd_vel.linear.x = 0.0;
           cmd_vel.angular.z = 0.0;
           return false;
-         } else{
-         geometry_msgs::PoseStamped goal_pose = global_plan_.back();
-         double yaw = getYaw(current_pose_);
-
-  // Calculate the goal direction from the robot's current pose to the goal pose
-         double target_yaw = atan2(goal_pose.pose.position.y - robot_pose_y, goal_pose.pose.position.x - robot_pose_x);
-         double yaw_error = angles::shortest_angular_distance(yaw,target_yaw);
-  
-  // If the yaw error is significant, perform a rotational correction
-         if (fabs(yaw_error) > 0.01 && rotate == true) {  // Threshold to decide when to rotate in place (0.1 rad)
-         cmd_vel.linear.x = 0.0;
-         cmd_vel.angular.z = 0.5;  // Rotate proportionally to the yaw error
-         }
-         rotate = false;
+         }else{
 
          cmd_vel.linear.x = drive_cmds.pose.position.x;
          cmd_vel.linear.y = drive_cmds.pose.position.y;
@@ -267,11 +267,13 @@ namespace mpc_ros{
            cmd_vel.linear.x = 0.0;
            cmd_vel.angular.z = 0.0;
            goal_reached_ = true;
+           rotate = true;
            ROS_INFO("Goal reached.");
          }
           return true;
          }
-    }
+       
+     }
 
     // Timer: Control Loop (closed loop nonlinear MPC)
     bool MPCPlannerROS::mpcComputeVelocityCommands(geometry_msgs::PoseStamped global_pose, geometry_msgs::PoseStamped& global_vel, 
