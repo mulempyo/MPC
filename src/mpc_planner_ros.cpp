@@ -138,7 +138,7 @@ namespace mpc_ros{
         }
 
         goal_reached_ = false;
- 
+        rotate = true;
 
         ROS_WARN("start Plan");
 
@@ -183,6 +183,9 @@ namespace mpc_ros{
             ROS_ERROR("Could not get robot pose");
             return false;
         }
+        double robot_pose_x = current_pose_.pose.position.x;
+        double robot_pose_y = current_pose_.pose.position.y; 
+
         std::vector<geometry_msgs::PoseStamped> transformed_plan;
         if ( ! planner_util_.getLocalPlan(current_pose_, transformed_plan)) {
             ROS_ERROR("Could not get local plan");
@@ -215,6 +218,20 @@ namespace mpc_ros{
           cmd_vel.angular.z = 0.0;
           return false;
          } else{
+         geometry_msgs::PoseStamped goal_pose = global_plan_.back();
+         double yaw = getYaw(current_pose_);
+
+  // Calculate the goal direction from the robot's current pose to the goal pose
+         double target_yaw = atan2(goal_pose.pose.position.y - robot_pose_y, goal_pose.pose.position.x - robot_pose_x);
+         double yaw_error = angles::shortest_angular_distance(yaw,target_yaw);
+  
+  // If the yaw error is significant, perform a rotational correction
+         if (fabs(yaw_error) > 0.01 && rotate == true) {  // Threshold to decide when to rotate in place (0.1 rad)
+         cmd_vel.linear.x = 0.0;
+         cmd_vel.angular.z = 0.5;  // Rotate proportionally to the yaw error
+         }
+         rotate = false;
+
          cmd_vel.linear.x = drive_cmds.pose.position.x;
          cmd_vel.linear.y = drive_cmds.pose.position.y;
          cmd_vel.angular.z = tf2::getYaw(drive_cmds.pose.orientation);
@@ -498,7 +515,7 @@ namespace mpc_ros{
     }
 
 
-	bool MPCPlannerROS::isGoalReached()
+    bool MPCPlannerROS::isGoalReached()
     {
       // check if plugin is initialized
       if (!initialized_)
@@ -544,6 +561,14 @@ namespace mpc_ros{
     {
         _odom = *odomMsg;
     }
+
+    double MPCPlannerROS::getYaw(const geometry_msgs::PoseStamped& pose) {
+      tf2::Quaternion q;
+      tf2::fromMsg(pose.pose.orientation, q);
+      double roll, pitch, yaw;
+      tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
+      return yaw;
+     }
 
     void MPCPlannerROS::publishGlobalPlan(const std::vector<geometry_msgs::PoseStamped>& global_plan)
     {
