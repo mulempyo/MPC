@@ -355,7 +355,53 @@ namespace mpc_ros{
                 total_length = total_length + _waypointsDist; 
                 sampling = sampling + 1;  
             }
+
            
+            if (!odom_path.poses.empty()) {
+            const geometry_msgs::PoseStamped& last_transformed_pose = odom_path.poses.back();
+            double min_distance = std::numeric_limits<double>::max();
+            int closest_index = -1;
+   
+            geometry_msgs::PoseStamped robot_pose;
+            costmap_ros_->getRobotPose(robot_pose);
+            double remaining_distance = 0.0;
+            for (int i = 1; i < global_plan_.size(); ++i) {
+                double dx = global_plan_[i].pose.position.x - global_plan_[i-1].pose.position.x;
+                double dy = global_plan_[i].pose.position.y - global_plan_[i-1].pose.position.y;
+                remaining_distance += sqrt(dx * dx + dy * dy);
+            }
+
+    
+            for (int i = 0; i < global_plan_.size(); ++i) {
+                double dx = global_plan_[i].pose.position.x - last_transformed_pose.pose.position.x;
+                double dy = global_plan_[i].pose.position.y - last_transformed_pose.pose.position.y;
+                double distance = sqrt(dx * dx + dy * dy);
+
+                if (distance < min_distance) {
+                    min_distance = distance;
+                    closest_index = i;
+                }
+               }
+
+   
+                 if ( _pathLength >= remaining_distance) {
+    
+                  odom_path.poses.back() = global_plan_.back();
+               } else {
+        
+                   if (closest_index >= 0 && closest_index < global_plan_.size()) {
+                      odom_path.poses.back() = global_plan_[closest_index];
+                 }
+               }
+
+   
+            if(closest_index >= 0 && closest_index < global_plan_.size()){
+            geometry_msgs::PoseStamped& goal_pose = odom_path.poses.back();
+            goal_pose.pose.orientation = global_plan_[closest_index].pose.orientation;
+          }
+        }
+
+
             if(odom_path.poses.size() > 3)
             {
                 // publish odom path
@@ -578,13 +624,6 @@ namespace mpc_ros{
         _odom = *odomMsg;
     }
 
-    double MPCPlannerROS::getYaw(const geometry_msgs::PoseStamped& pose) {
-      tf2::Quaternion q;
-      tf2::fromMsg(pose.pose.orientation, q);
-      double roll, pitch, yaw;
-      tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
-      return yaw;
-     }
 
     void MPCPlannerROS::publishGlobalPlan(const std::vector<geometry_msgs::PoseStamped>& global_plan)
     {

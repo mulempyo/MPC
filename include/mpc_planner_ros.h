@@ -88,7 +88,7 @@ namespace mpc_ros{
             bool isGoalReached();
             bool isInitialized() {return initialized_;}
             void publishGlobalPlan(const std::vector<geometry_msgs::PoseStamped>& global_plan);
-            double getYaw(const geometry_msgs::PoseStamped& pose);
+            
             /**
              * @brief  Update the cost functions before planning
              * @param  global_pose The robot's current pose
